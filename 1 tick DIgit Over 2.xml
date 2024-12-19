@@ -366,4 +366,81 @@
       </block>
     </statement>
   </block>
-</xml>
+</xml>import pandas as pd
+import numpy as np
+import ta
+import ccxt
+from time import sleep
+
+# Initialize broker API
+def initialize_api(api_key, secret):
+    exchange = ccxt.binance({  # Replace with your broker's API
+        'apiKey': api_key,
+        'secret': secret,
+    })
+    return exchange
+
+# Fetch live market data
+def fetch_data(exchange, symbol, timeframe, limit=100):
+    candles = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    return df
+
+# Sniper entry strategy
+def sniper_entry_strategy(df):
+    # Add indicators
+    df['rsi'] = ta.momentum.RSIIndicator(df['close']).rsi()
+    macd = ta.trend.MACD(df['close'])
+    df['macd_diff'] = macd.macd_diff()
+    
+    # Signal conditions
+    buy_signal = (df['rsi'] < 30) & (df['macd_diff'] > 0)
+    sell_signal = (df['rsi'] > 70) & (df['macd_diff'] < 0)
+    
+    df['signal'] = np.where(buy_signal, 'buy', np.where(sell_signal, 'sell', 'hold'))
+    return df
+
+# Execute trade
+def execute_trade(exchange, symbol, side, amount):
+    try:
+        order = exchange.create_market_order(symbol, side, amount)
+        print(f"Trade executed: {side} {amount} {symbol}")
+        return order
+    except Exception as e:
+        print(f"Error executing trade: {e}")
+        return None
+
+# Risk management
+def risk_management(balance, risk_percentage):
+    risk_amount = balance * (risk_percentage / 100)
+    return risk_amount
+
+# Main bot loop
+def main():
+    api_key = 'your_api_key'
+    secret = 'your_secret_key'
+    symbol = 'BTC/USDT'
+    timeframe = '1m'
+    risk_percentage = 1  # Risk per trade in percentage
+
+    exchange = initialize_api(api_key, secret)
+
+    while True:
+        df = fetch_data(exchange, symbol, timeframe)
+        df = sniper_entry_strategy(df)
+        
+        last_signal = df.iloc[-1]['signal']
+        balance = exchange.fetch_balance()['USDT']['free']
+        risk_amount = risk_management(balance, risk_percentage)
+        
+        if last_signal == 'buy':
+            execute_trade(exchange, symbol, 'buy', risk_amount)
+        elif last_signal == 'sell':
+            execute_trade(exchange, symbol, 'sell', risk_amount)
+        
+        # Sleep to avoid rate limits
+        sleep(60)
+
+if __name__ == "__main__":
+    main()
